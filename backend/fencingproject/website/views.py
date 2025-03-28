@@ -1,5 +1,7 @@
 from django.shortcuts import render
 from django.http import Http404
+from django.utils import timezone
+from django.db.models import Sum
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
@@ -98,7 +100,7 @@ class PlayerDetail(APIView):
 # Get all players and create new tournament
 class TournamentList(APIView):
     def get(self, request):
-        tournaments = TournamentList.objects.all()
+        tournaments = Tournament.objects.all()
         serializer = TournamentSerializer(tournaments, many=True)
         return Response(serializer.data)
     
@@ -254,12 +256,103 @@ class TournamentPlayerDetail(APIView):
         tournament_player = self.get_object(pk)
         tournament_player.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
-    
-    
-    
-    
-    
-    
+""" 
+Actual API views used currently
+"""
+class PlayerRankingView(APIView):
+    def get(self, request, category, format=None):
+        current_year = timezone.now().year
+        top = request.GET.get('top', None) 
+        yearly_rankings = (
+            Player_Point.objects
+            .filter(
+                player_id__player_type=category,
+                match_date__year=current_year
+            )
+            .values(
+                'player_id',
+                'player_id__player_name',
+                'player_id__player_age',
+                'player_id__player_affiliation'
+            )
+            .annotate(total_points=Sum('points_earned'))
+            .order_by('-total_points')
+        )
+        if top and top.isdigit():
+            top_limit = int(top)
+            yearly_rankings = yearly_rankings[:top_limit]
+        data = []
+        for idx, record in enumerate(yearly_rankings, start=1):
+            data.append({
+                "rank": idx,
+                "player_name": record["player_id__player_name"],
+                "age": record["player_id__player_age"],
+                "affiliation": record["player_id__player_affiliation"],
+                "total_points": record["total_points"] or 0,
+            })
+
+        return Response(data)
     
 
+class RecentMatchesView(APIView):
+    def get(self, request, category, format=None):
+        recent_matches = (
+            Match.objects
+            .select_related('tournament_id', 'player1', 'player2')
+            .filter(event_type=category)        
+            .order_by('-match_date')[:5]
+        )
 
+        data = []
+        for match in recent_matches:
+            p1_name = match.player1.player_name
+            p1_affiliation = match.player1.player_affiliation
+            p1_score = match.player1_score
+            p1_yellow = match.player1_yellowcard
+
+            if p1_yellow == 0:
+                p1_yellow_count = 0
+                p1_red_count = 0
+            elif p1_yellow == 1:
+                p1_yellow_count = 1
+                p1_red_count = 0
+            else:  
+                p1_yellow_count = 1
+                p1_red_count = p1_yellow - 1
+
+            p2_name = match.player2.player_name
+            p2_affiliation = match.player2.player_affiliation
+            p2_score = match.player2_score
+            p2_yellow = match.player2_yellowcard
+
+            if p2_yellow == 0:
+                p2_yellow_count = 0
+                p2_red_count = 0
+            elif p2_yellow == 1:
+                p2_yellow_count = 1
+                p2_red_count = 0
+            else:
+                p2_yellow_count = 1
+                p2_red_count = p2_yellow - 1
+
+            data.append({
+                "tournament_name": match.tournament_id.tournament_name,
+                "tournament_date": match.tournament_id.tournament_date.date(),
+                "round": match.match_type,
+
+                # Player1 info
+                "player_1_name": p1_name,
+                "player_1_affiliation": p1_affiliation,
+                "player_1_score": p1_score,
+                "player_1_yellow_card_count": p1_yellow_count,
+                "player_1_red_card_count": p1_red_count,
+
+                # Player2 info
+                "player_2_name": p2_name,
+                "player_2_affiliation": p2_affiliation,
+                "player_2_score": p2_score,
+                "player_2_yellow_card_count": p2_yellow_count,
+                "player_2_red_card_count": p2_red_count,
+            })
+
+        return Response(data)
