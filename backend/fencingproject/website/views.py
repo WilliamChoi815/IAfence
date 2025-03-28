@@ -356,3 +356,42 @@ class RecentMatchesView(APIView):
             })
 
         return Response(data)
+
+class TournamentWithMatchesView(APIView):
+    def get(self, request, category, format=None):
+        top = request.GET.get('top', None) 
+        tournaments = Tournament.objects.order_by('-tournament_date')
+        if top and top.isdigit():
+            tournaments = tournaments[:int(top)]
+        data = []
+
+        for tournament in tournaments:
+            brackets = Tournament_Bracket.objects.filter(
+                tournament_id=tournament
+            ).select_related('match_id__player1', 'match_id__player2').order_by('match_number')
+
+            matches_data = []
+            for bracket in brackets:
+                match = bracket.match_id
+                matches_data.append({
+                    "match_id": match.match_id,
+                    "match_number": bracket.match_number,
+                    "match_type": match.match_type,
+                    "match_date": match.match_date,
+                    "player1_name": match.player1.player_name,
+                    "player1_score": match.player1_score,
+                    "player2_name": match.player1.player_name,
+                    "player2_score": match.player2_score,
+                    "completed": match.completed,
+                })
+
+            tournament_data = {
+                "tournament_id": tournament.tournament_id,
+                "tournament_name": tournament.tournament_name,
+                "tournament_date": tournament.tournament_date.date(),
+                "matches": matches_data
+            }
+
+            data.append(tournament_data)
+
+        return Response(data)
